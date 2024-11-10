@@ -22,7 +22,16 @@ fn main() {
     let mut logical_lines = Vec::<LogicalLine>::new();
     let mut look_for_keys = Vec::<String>::new();
 
-    logical_lines.push(LogicalLine{indent: 0, statement: Statement::Definition { key: "".to_string(), character: Character { name: "".to_string(), color: "".to_string() } }});
+    logical_lines.push(LogicalLine {
+        indent: 0,
+        statement: Statement::Definition {
+            key: "".to_string(),
+            character: Character {
+                name: "".to_string(),
+                color: "".to_string(),
+            },
+        },
+    });
 
     for line in script.lines() {
         let line_trim = line.trim();
@@ -45,53 +54,64 @@ fn main() {
                 color: color,
             };
 
-            logical_lines.push(LogicalLine{indent: line.find("define").unwrap(),
+            logical_lines.push(LogicalLine {
+                indent: line.find("define").unwrap(),
                 statement: Statement::Definition {
-                key: key.clone(),
-                character: character,
-            }});
+                    key: key.clone(),
+                    character: character,
+                },
+            });
             look_for_keys.push(key);
         } else if line_trim.starts_with("label") {
             let line_new = line_trim.replace("label", "").trim().to_string();
             let key = line_new.replace(":", "").trim().to_string();
-            logical_lines.push(LogicalLine{indent: line.find("label").unwrap(),
-                statement: Statement::Label {
-                key: key,
-            }});
+            logical_lines.push(LogicalLine {
+                indent: line.find("label").unwrap(),
+                statement: Statement::Label { key: key },
+            });
         } else if line_trim.starts_with("\"") {
             let text = line_trim.trim().to_string();
             if line.ends_with(":") {
-                logical_lines.push(LogicalLine{indent: line.find("\"").unwrap(),
-                    statement: Statement::Choice {
-                    text: text,
-                }});
+                logical_lines.push(LogicalLine {
+                    indent: line.find("\"").unwrap(),
+                    statement: Statement::Choice { text: text },
+                });
                 continue;
             }
-            logical_lines.push(LogicalLine{indent: line.find("\"").unwrap(),
+            logical_lines.push(LogicalLine {
+                indent: line.find("\"").unwrap(),
                 statement: Statement::Dialogue {
-                character_key: "".to_string(),
-                text: text,
-            }});
+                    character_key: "".to_string(),
+                    text: text,
+                },
+            });
         } else if line_trim.starts_with("menu") {
-            logical_lines.push(LogicalLine{indent: line.find("menu").unwrap(),
-                statement: Statement::Menu {}});
+            logical_lines.push(LogicalLine {
+                indent: line.find("menu").unwrap(),
+                statement: Statement::Menu {},
+            });
         } else if line_trim.starts_with("jump") {
             let line_new = line_trim.replace("jump", "").trim().to_string();
             let key = line_new.replace(":", "").trim().to_string();
-            logical_lines.push(LogicalLine{indent: line.find("jump").unwrap(),
-                statement: Statement::Jump {
-                key: key,
-            }});
-        }
-        else {
+            logical_lines.push(LogicalLine {
+                indent: line.find("jump").unwrap(),
+                statement: Statement::Jump { key: key },
+            });
+        } else {
             for key in look_for_keys.iter() {
                 if line_trim.starts_with(format!("{} ", key).as_str()) {
-                    let text = line_trim.split(" ").skip(1).collect::<Vec<&str>>().join(" ");
-                    logical_lines.push(LogicalLine{indent: line.find(key).unwrap(),
+                    let text = line_trim
+                        .split(" ")
+                        .skip(1)
+                        .collect::<Vec<&str>>()
+                        .join(" ");
+                    logical_lines.push(LogicalLine {
+                        indent: line.find(key).unwrap(),
                         statement: Statement::Dialogue {
-                        character_key: key.clone(),
-                        text: text,
-                    }});
+                            character_key: key.clone(),
+                            text: text,
+                        },
+                    });
                 }
             }
         }
@@ -107,7 +127,10 @@ fn main() {
             Statement::Label { key } => {
                 println!("Label: {}", key);
             }
-            Statement::Dialogue { character_key, text} => {
+            Statement::Dialogue {
+                character_key,
+                text,
+            } => {
                 println!("{}: {}", character_key, text);
             }
             Statement::Menu {} => {
