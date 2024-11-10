@@ -7,6 +7,9 @@ enum Statement {
     Definition { key: String, character: Character },
     Label { key: String },
     Dialogue { character_key: String, text: String },
+    Menu {},
+    Choice { text: String },
+    Jump { key: String },
 }
 
 struct Character {
@@ -57,15 +60,33 @@ fn main() {
             }});
         } else if line_trim.starts_with("\"") {
             let text = line_trim.trim().to_string();
+            if line.ends_with(":") {
+                logical_lines.push(LogicalLine{indent: line.find("\"").unwrap(),
+                    statement: Statement::Choice {
+                    text: text,
+                }});
+                continue;
+            }
             logical_lines.push(LogicalLine{indent: line.find("\"").unwrap(),
                 statement: Statement::Dialogue {
                 character_key: "".to_string(),
                 text: text,
             }});
-        } else {
+        } else if line_trim.starts_with("menu") {
+            logical_lines.push(LogicalLine{indent: line.find("menu").unwrap(),
+                statement: Statement::Menu {}});
+        } else if line_trim.starts_with("jump") {
+            let line_new = line_trim.replace("jump", "").trim().to_string();
+            let key = line_new.replace(":", "").trim().to_string();
+            logical_lines.push(LogicalLine{indent: line.find("jump").unwrap(),
+                statement: Statement::Jump {
+                key: key,
+            }});
+        }
+        else {
             for key in look_for_keys.iter() {
                 if line_trim.starts_with(format!("{} ", key).as_str()) {
-                    let text = line_trim.replace(key, "").trim().to_string();
+                    let text = line_trim.split(" ").skip(1).collect::<Vec<&str>>().join(" ");
                     logical_lines.push(LogicalLine{indent: line.find(key).unwrap(),
                         statement: Statement::Dialogue {
                         character_key: key.clone(),
@@ -88,6 +109,15 @@ fn main() {
             }
             Statement::Dialogue { character_key, text} => {
                 println!("{}: {}", character_key, text);
+            }
+            Statement::Menu {} => {
+                println!("Menu");
+            }
+            Statement::Choice { text } => {
+                println!("Choice: {}", text);
+            }
+            Statement::Jump { key } => {
+                println!("Jump: {}", key);
             }
         }
     }
