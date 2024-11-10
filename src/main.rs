@@ -14,6 +14,7 @@ enum ParseStatement {
     Menu {},
     Choice { text: String },
     Jump { key: String },
+    End {},
 }
 
 #[derive(Debug, Clone)]
@@ -22,11 +23,15 @@ struct Character {
     color: String,
 }
 
+#[derive(Debug, Clone)]
 struct Page {
     index: usize,
+    label: Option::<String>,
     content: Page_Content,
+    unconditional_jump: Option::<String>,
 }
 
+#[derive(Debug, Clone)]
 enum Page_Content {
     Dialogue {
         character_name: String,
@@ -39,6 +44,7 @@ enum Page_Content {
     },
 }
 
+#[derive(Debug, Clone)]
 struct MenuChoice {
     text: String,
     jump_key: String,
@@ -92,10 +98,15 @@ fn main() {
             ParseStatement::Jump { key } => {
                 println!("Jump: {}", key);
             }
+            ParseStatement::End {} => {
+                println!("End");
+            }
         }
     }
 
     let pages = traverse_game(logical_lines);
+
+    println!("Pages: {:#?}", pages);
 
     let latex = latex_output(pages);
 
@@ -168,6 +179,11 @@ fn parse_line(
             indent: line.find("jump").unwrap(),
             statement: ParseStatement::Jump { key: key },
         });
+    } else if line_trim.starts_with("return") {
+        return Ok(ParseLogicalLine {
+            indent: line.find("return").unwrap(),
+            statement: ParseStatement::End {},
+        });
     } else {
         for key in look_for_keys.iter() {
             if line_trim.starts_with(format!("{} ", key).as_str()) {
@@ -209,6 +225,8 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
     println!("Start index: {}", label_start_index);
 
     let mut current_index = label_start_index + 1;
+    let mut next_has_label = false;
+    let mut next_label = "".to_string();
     loop {
         let line = &logical_lines[current_index];
         let statement = &line.statement;
@@ -217,24 +235,36 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
                 character_key,
                 text,
             } => {
+                let mut label = None;
+                if next_has_label {
+                    label = Some(next_label.clone());
+                    next_has_label = false;
+                }
                 pages.push(Page {
                     index: current_index,
+                    label: label,
                     content: Page_Content::Dialogue {
                         character_name: characters.get(character_key).unwrap().name.clone(),
                         text: text.clone(),
                     },
+                    unconditional_jump: None,
                 });
                 current_index += 1;
             }
             ParseStatement::Menu {} => {
+                let mut label = None;
+                if next_has_label {
+                    label = Some(next_label.clone());
+                    next_has_label = false;
+                }
                 let mut choices = Vec::<MenuChoice>::new();
 
                 let mut character_name = "".to_string();
                 let mut character_text: String = "".to_string();
 
-                let mut new_index = current_index + 1;
+                current_index = current_index + 1;
                 loop {
-                    let line = &logical_lines[new_index];
+                    let line = &logical_lines[current_index];
                     let statement = &line.statement;
                     match statement {
                         ParseStatement::Choice { text } => {
@@ -242,17 +272,17 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
                                 text: text.clone(),
                                 jump_key: "".to_string(),
                             });
-                            new_index += 1;
+                            current_index += 1;
                         }
                         ParseStatement::Jump { key } => {
                             choices.last_mut().unwrap().jump_key = key.clone();
-                            new_index += 1;
+                            current_index += 1;
                         }
                         ParseStatement::Dialogue { character_key, text }  => {
                             character_name = characters.get(character_key).unwrap().name.clone();
                             character_text = text.clone();
 
-                            new_index += 1;
+                            current_index += 1;
                         }
                         _ => {
                             break;
@@ -262,9 +292,31 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
 
                 pages.push(Page {
                     index: current_index,
+                    label: None,
                     content: Page_Content::Menu { character_name: character_name, text: character_text, choices: choices },
+                    unconditional_jump: None,
                 });
+            }
+            ParseStatement::Label { key } => {
+                next_has_label = true;
+                next_label = key.clone();
 
+                current_index += 1;
+            }
+            ParseStatement::Jump { key } => {
+                pages.last_mut().unwrap().unconditional_jump = Some(key.clone());
+                current_index += 1;
+            }
+            ParseStatement::End {} => {
+                pages.push(Page {
+                    index: current_index,
+                    label: None,
+                    content: Page_Content::Dialogue {
+                        character_name: "".to_string(),
+                        text: "End".to_string(),
+                    },
+                    unconditional_jump: None,
+                });
                 current_index += 1;
             }
             _ => {
@@ -297,6 +349,7 @@ fn latex_output(pages: Vec<Page>) -> String {
     let mut output = String::new();
 
     output += "\\documentclass{beamer}\n\
+    \\usepackage{hyperref}\n\
     \\title{Game Title}\n\
     \\author{Game Author}\n\
     \\date{\\today}\n\
@@ -305,33 +358,36 @@ fn latex_output(pages: Vec<Page>) -> String {
     ";
 
     for page in pages {
+        output += "\\begin{frame}\n";
+        if let Some(label) = page.label {
+            output += format!("\\phantomsection\\hypertarget{{{}}}\n", label).as_str();
+        }
         match page.content {
             Page_Content::Dialogue {
                 character_name: character_key,
                 text,
             } => {
                 output += format!(
-                    "\\frame{{\n\
-                    \\frametitle{{{}}}\n\
-                    {}\n\
-                    }}\n",
+                    "\\frametitle{{{}}}\n\
+                    {}\n",
                     character_key, text
                 )
                 .as_str();
             }
             Page_Content::Menu { character_name, text, choices } => {
-                output += "\\frame{\n";
                 output += format!("\\frametitle{{{}}}\n", character_name).as_str();
                 output += format!("{}\n", text).as_str();
                 output += "\\begin{itemize}\n";
                 for choice in choices {
-                    output += format!("\\item {}\n", choice.text).as_str();
+                    output += format!("\\item \\hyperlink{{{}}}{{{}}}\n", choice.jump_key, choice.text).as_str();
                 }
                 output += "\\end{itemize}\n";
-                output += "}\n";
             }
-            _ => (),
         }
+        if let Some(jump) = page.unconditional_jump {
+            output += format!("\\hyperlink{{{}}}{{\\beamergotobutton{{Next}}}}\n", jump).as_str();
+        }
+        output += "\\end{frame}\n";
     }
 
     output += "\\end{document}\n";
