@@ -1,3 +1,5 @@
+use std::{f32::consts::E, fmt::Error};
+
 struct LogicalLine {
     indent: usize,
     statement: Statement,
@@ -34,86 +36,9 @@ fn main() {
     });
 
     for line in script.lines() {
-        let line_trim = line.trim();
-        if line_trim.starts_with("define") {
-            let line_new = line_trim.replace("define", "");
-            let line_split: Vec<String> = line_new.split("=").map(|x| x.to_string()).collect();
-
-            let key = line_split[0].trim().to_string();
-
-            let name_first_quote = line_split[1].find("\"").unwrap();
-            let name_last_quote = line_split[1].rfind("\"").unwrap();
-            let name = line_split[1][name_first_quote + 1..name_last_quote].to_string();
-
-            let color_first_quote = line_split[2].find("\"").unwrap();
-            let color_last_quote = line_split[2].rfind("\"").unwrap();
-            let color = line_split[2][color_first_quote + 1..color_last_quote].to_string();
-
-            let character = Character {
-                name: name,
-                color: color,
-            };
-
-            logical_lines.push(LogicalLine {
-                indent: line.find("define").unwrap(),
-                statement: Statement::Definition {
-                    key: key.clone(),
-                    character: character,
-                },
-            });
-            look_for_keys.push(key);
-        } else if line_trim.starts_with("label") {
-            let line_new = line_trim.replace("label", "").trim().to_string();
-            let key = line_new.replace(":", "").trim().to_string();
-            logical_lines.push(LogicalLine {
-                indent: line.find("label").unwrap(),
-                statement: Statement::Label { key: key },
-            });
-        } else if line_trim.starts_with("\"") {
-            let text = line_trim.trim().to_string();
-            if line.ends_with(":") {
-                logical_lines.push(LogicalLine {
-                    indent: line.find("\"").unwrap(),
-                    statement: Statement::Choice { text: text },
-                });
-                continue;
-            }
-            logical_lines.push(LogicalLine {
-                indent: line.find("\"").unwrap(),
-                statement: Statement::Dialogue {
-                    character_key: "".to_string(),
-                    text: text,
-                },
-            });
-        } else if line_trim.starts_with("menu") {
-            logical_lines.push(LogicalLine {
-                indent: line.find("menu").unwrap(),
-                statement: Statement::Menu {},
-            });
-        } else if line_trim.starts_with("jump") {
-            let line_new = line_trim.replace("jump", "").trim().to_string();
-            let key = line_new.replace(":", "").trim().to_string();
-            logical_lines.push(LogicalLine {
-                indent: line.find("jump").unwrap(),
-                statement: Statement::Jump { key: key },
-            });
-        } else {
-            for key in look_for_keys.iter() {
-                if line_trim.starts_with(format!("{} ", key).as_str()) {
-                    let text = line_trim
-                        .split(" ")
-                        .skip(1)
-                        .collect::<Vec<&str>>()
-                        .join(" ");
-                    logical_lines.push(LogicalLine {
-                        indent: line.find(key).unwrap(),
-                        statement: Statement::Dialogue {
-                            character_key: key.clone(),
-                            text: text,
-                        },
-                    });
-                }
-            }
+        match parse_line(line.to_string(), &mut look_for_keys) {
+            Ok(logical_line) => logical_lines.push(logical_line),
+            Err(_) => (println!("Invalid line: {}", line)),
         }
     }
 
@@ -144,4 +69,88 @@ fn main() {
             }
         }
     }
+}
+
+fn parse_line(line: String, look_for_keys: &mut Vec<String>) -> Result<LogicalLine, &'static str> {
+    let line_trim = line.trim();
+    if line_trim.starts_with("define") {
+        let line_new = line_trim.replace("define", "");
+        let line_split: Vec<String> = line_new.split("=").map(|x| x.to_string()).collect();
+
+        let key = line_split[0].trim().to_string();
+
+        let name_first_quote = line_split[1].find("\"").unwrap();
+        let name_last_quote = line_split[1].rfind("\"").unwrap();
+        let name = line_split[1][name_first_quote + 1..name_last_quote].to_string();
+
+        let color_first_quote = line_split[2].find("\"").unwrap();
+        let color_last_quote = line_split[2].rfind("\"").unwrap();
+        let color = line_split[2][color_first_quote + 1..color_last_quote].to_string();
+
+        let character = Character {
+            name: name,
+            color: color,
+        };
+
+        return Ok(LogicalLine {
+            indent: line.find("define").unwrap(),
+            statement: Statement::Definition {
+                key: key.clone(),
+                character: character,
+            },
+        });
+        look_for_keys.push(key);
+    } else if line_trim.starts_with("label") {
+        let line_new = line_trim.replace("label", "").trim().to_string();
+        let key = line_new.replace(":", "").trim().to_string();
+        return Ok(LogicalLine {
+            indent: line.find("label").unwrap(),
+            statement: Statement::Label { key: key },
+        });
+    } else if line_trim.starts_with("\"") {
+        let text = line_trim.trim().to_string();
+        if line.ends_with(":") {
+            return Ok(LogicalLine {
+                indent: line.find("\"").unwrap(),
+                statement: Statement::Choice { text: text },
+            });
+        }
+        return Ok(LogicalLine {
+            indent: line.find("\"").unwrap(),
+            statement: Statement::Dialogue {
+                character_key: "".to_string(),
+                text: text,
+            },
+        });
+    } else if line_trim.starts_with("menu") {
+        return Ok(LogicalLine {
+            indent: line.find("menu").unwrap(),
+            statement: Statement::Menu {},
+        });
+    } else if line_trim.starts_with("jump") {
+        let line_new = line_trim.replace("jump", "").trim().to_string();
+        let key = line_new.replace(":", "").trim().to_string();
+        return Ok(LogicalLine {
+            indent: line.find("jump").unwrap(),
+            statement: Statement::Jump { key: key },
+        });
+    } else {
+        for key in look_for_keys.iter() {
+            if line_trim.starts_with(format!("{} ", key).as_str()) {
+                let text = line_trim
+                    .split(" ")
+                    .skip(1)
+                    .collect::<Vec<&str>>()
+                    .join(" ");
+                return Ok(LogicalLine {
+                    indent: line.find(key).unwrap(),
+                    statement: Statement::Dialogue {
+                        character_key: key.clone(),
+                        text: text,
+                    },
+                });
+            }
+        }
+    }
+    return Err("Invalid line");
 }
