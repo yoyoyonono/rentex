@@ -1,10 +1,12 @@
-use std::{f32::consts::E, fmt::Error};
+use std::collections::HashMap;
 
+#[derive(Debug, Clone)]
 struct ParseLogicalLine {
     indent: usize,
     statement: ParseStatement,
 }
 
+#[derive(Debug, Clone)]
 enum ParseStatement {
     Definition { key: String, character: Character },
     Label { key: String },
@@ -14,9 +16,32 @@ enum ParseStatement {
     Jump { key: String },
 }
 
+#[derive(Debug, Clone)]
 struct Character {
     name: String,
     color: String,
+}
+
+struct Page {
+    index: usize,
+    content: Page_Content,
+}
+
+enum Page_Content {
+    Dialogue {
+        character_name: String,
+        text: String,
+    },
+    Menu {
+        character_name: String,
+        text: String,
+        choices: Vec<MenuChoice>,
+    },
+}
+
+struct MenuChoice {
+    text: String,
+    jump_key: String,
 }
 
 fn main() {
@@ -42,7 +67,7 @@ fn main() {
         }
     }
 
-    for line in logical_lines {
+    for line in logical_lines.clone() {
         let statement = line.statement;
         print!("{}", " ".repeat(line.indent));
         match statement {
@@ -69,9 +94,18 @@ fn main() {
             }
         }
     }
+
+    let pages = traverse_game(logical_lines);
+
+    let latex = latex_output(pages);
+
+    std::fs::write("out.tex", latex).unwrap();
 }
 
-fn parse_line(line: String, look_for_keys: &mut Vec<String>) -> Result<ParseLogicalLine, &'static str> {
+fn parse_line(
+    line: String,
+    look_for_keys: &mut Vec<String>,
+) -> Result<ParseLogicalLine, &'static str> {
     let line_trim = line.trim();
     if line_trim.starts_with("define") {
         let line_new = line_trim.replace("define", "");
@@ -112,14 +146,14 @@ fn parse_line(line: String, look_for_keys: &mut Vec<String>) -> Result<ParseLogi
         if line.ends_with(":") {
             return Ok(ParseLogicalLine {
                 indent: line.find("\"").unwrap(),
-                statement: ParseStatement::Choice { text: text },
+                statement: ParseStatement::Choice { text: clean_up_text(text) },
             });
         }
         return Ok(ParseLogicalLine {
             indent: line.find("\"").unwrap(),
             statement: ParseStatement::Dialogue {
                 character_key: "".to_string(),
-                text: text,
+                text: clean_up_text(text),
             },
         });
     } else if line_trim.starts_with("menu") {
@@ -146,11 +180,165 @@ fn parse_line(line: String, look_for_keys: &mut Vec<String>) -> Result<ParseLogi
                     indent: line.find(key).unwrap(),
                     statement: ParseStatement::Dialogue {
                         character_key: key.clone(),
-                        text: text,
+                        text: clean_up_text(text),
                     },
                 });
             }
         }
     }
     return Err("Invalid line");
+}
+
+fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
+    let mut pages = Vec::<Page>::new();
+    let mut characters = HashMap::<String, Character>::new();
+
+    // define characters
+    for line in logical_lines.clone() {
+        let statement = &line.statement;
+        match statement {
+            ParseStatement::Definition { key, character } => {
+                characters.insert(key.clone(), character.clone());
+            }
+            _ => (),
+        }
+    }
+
+    // find start label
+    let label_start_index = find_label_index(logical_lines.clone(), "start".to_string());
+    println!("Start index: {}", label_start_index);
+
+    let mut current_index = label_start_index + 1;
+    loop {
+        let line = &logical_lines[current_index];
+        let statement = &line.statement;
+        match statement {
+            ParseStatement::Dialogue {
+                character_key,
+                text,
+            } => {
+                pages.push(Page {
+                    index: current_index,
+                    content: Page_Content::Dialogue {
+                        character_name: characters.get(character_key).unwrap().name.clone(),
+                        text: text.clone(),
+                    },
+                });
+                current_index += 1;
+            }
+            ParseStatement::Menu {} => {
+                let mut choices = Vec::<MenuChoice>::new();
+
+                let mut character_name = "".to_string();
+                let mut character_text: String = "".to_string();
+
+                let mut new_index = current_index + 1;
+                loop {
+                    let line = &logical_lines[new_index];
+                    let statement = &line.statement;
+                    match statement {
+                        ParseStatement::Choice { text } => {
+                            choices.push(MenuChoice {
+                                text: text.clone(),
+                                jump_key: "".to_string(),
+                            });
+                            new_index += 1;
+                        }
+                        ParseStatement::Jump { key } => {
+                            choices.last_mut().unwrap().jump_key = key.clone();
+                            new_index += 1;
+                        }
+                        ParseStatement::Dialogue { character_key, text }  => {
+                            character_name = characters.get(character_key).unwrap().name.clone();
+                            character_text = text.clone();
+
+                            new_index += 1;
+                        }
+                        _ => {
+                            break;
+                        }
+                    }
+                }
+
+                pages.push(Page {
+                    index: current_index,
+                    content: Page_Content::Menu { character_name: character_name, text: character_text, choices: choices },
+                });
+
+                current_index += 1;
+            }
+            _ => {
+                current_index += 1;
+            }
+        }
+        if current_index == logical_lines.len() - 1 {
+            break;
+        }
+    }
+
+    pages
+}
+
+fn find_label_index(logical_lines: Vec<ParseLogicalLine>, key: String) -> usize {
+    for (index, line) in logical_lines.iter().enumerate() {
+        match &line.statement {
+            ParseStatement::Label { key: key_label } => {
+                if key == *key_label {
+                    return index;
+                }
+            }
+            _ => (),
+        }
+    }
+    return 0;
+}
+
+fn latex_output(pages: Vec<Page>) -> String {
+    let mut output = String::new();
+
+    output += "\\documentclass{beamer}\n\
+    \\title{Game Title}\n\
+    \\author{Game Author}\n\
+    \\date{\\today}\n\
+    \\begin{document}\n\
+    \\frame{\\titlepage}\n\
+    ";
+
+    for page in pages {
+        match page.content {
+            Page_Content::Dialogue {
+                character_name: character_key,
+                text,
+            } => {
+                output += format!(
+                    "\\frame{{\n\
+                    \\frametitle{{{}}}\n\
+                    {}\n\
+                    }}\n",
+                    character_key, text
+                )
+                .as_str();
+            }
+            Page_Content::Menu { character_name, text, choices } => {
+                output += "\\frame{\n";
+                output += format!("\\frametitle{{{}}}\n", character_name).as_str();
+                output += format!("{}\n", text).as_str();
+                output += "\\begin{itemize}\n";
+                for choice in choices {
+                    output += format!("\\item {}\n", choice.text).as_str();
+                }
+                output += "\\end{itemize}\n";
+                output += "}\n";
+            }
+            _ => (),
+        }
+    }
+
+    output += "\\end{document}\n";
+
+    output
+}
+
+fn clean_up_text(text: String) -> String {
+    text.replace("\\\"", "\"")
 }
