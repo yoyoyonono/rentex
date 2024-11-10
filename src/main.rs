@@ -92,14 +92,14 @@ fn parse_line(line: String, look_for_keys: &mut Vec<String>) -> Result<LogicalLi
             color: color,
         };
 
+        look_for_keys.push(key.clone());
         return Ok(LogicalLine {
             indent: line.find("define").unwrap(),
             statement: Statement::Definition {
-                key: key.clone(),
+                key: key,
                 character: character,
             },
         });
-        look_for_keys.push(key);
     } else if line_trim.starts_with("label") {
         let line_new = line_trim.replace("label", "").trim().to_string();
         let key = line_new.replace(":", "").trim().to_string();
