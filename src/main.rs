@@ -118,7 +118,7 @@ fn parse_line(
     look_for_keys: &mut Vec<String>,
 ) -> Result<ParseLogicalLine, &'static str> {
     let line_trim = line.trim();
-    if line_trim.starts_with("define") {
+    if line_trim.starts_with("define") && line_trim.contains("Character") {
         let line_new = line_trim.replace("define", "");
         let line_split: Vec<String> = line_new.split("=").map(|x| x.to_string()).collect();
 
@@ -128,9 +128,13 @@ fn parse_line(
         let name_last_quote = line_split[1].rfind("\"").unwrap();
         let name = line_split[1][name_first_quote + 1..name_last_quote].to_string();
 
-        let color_first_quote = line_split[2].find("\"").unwrap();
-        let color_last_quote = line_split[2].rfind("\"").unwrap();
-        let color = line_split[2][color_first_quote + 1..color_last_quote].to_string();
+        let color = if line_trim.contains("color") {
+            let color_first_quote = line_split[2].find("\"").unwrap();
+            let color_last_quote = line_split[2].rfind("\"").unwrap();
+            line_split[2][color_first_quote + 1..color_last_quote].to_string()
+        } else {
+            "".to_string()
+        };
 
         let character = Character {
             name: name,
@@ -184,6 +188,22 @@ fn parse_line(
             indent: line.find("return").unwrap(),
             statement: ParseStatement::End {},
         });
+    } else if line_trim.starts_with("$ speak") {
+        // Example line 
+        // $ speak(NICOLE, "Long story...")
+        let line_new = line_trim.replace("$ speak(", "").trim().to_string();        
+        let line_split: Vec<String> = line_new.splitn(2, ",").map(|x| x.to_string()).collect();
+        let key = line_split[0].trim().to_string();
+        let first_quote = line_split[1].find("\"").unwrap();
+        let last_quote = line_split[1].rfind("\"").unwrap();
+        let text = line_split[1][first_quote + 1..last_quote].to_string();
+        return Ok(ParseLogicalLine {
+            indent: line.find("$ speak").unwrap(),
+            statement: ParseStatement::Dialogue {
+                character_key: key,
+                text: clean_up_text(text),
+            },
+        });
     } else {
         for key in look_for_keys.iter() {
             if line_trim.starts_with(format!("{} ", key).as_str()) {
@@ -208,6 +228,18 @@ fn parse_line(
 fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
     let mut pages = Vec::<Page>::new();
     let mut characters = HashMap::<String, Character>::new();
+
+    // push title page
+
+    pages.push(Page {
+        index: 0,
+        label: None,
+        content: Page_Content::Dialogue {
+            character_name: "".to_string(),
+            text: "Title Page".to_string(),
+        },
+        unconditional_jump: None,
+    });
 
     // define characters
     for line in logical_lines.clone() {
@@ -359,27 +391,31 @@ fn latex_output(pages: Vec<Page>) -> String {
 
     for page in pages {
         output += "\\begin{frame}\n";
-        if let Some(label) = page.label {
-            output += format!("\\phantomsection\\hypertarget{{{}}}\n", label).as_str();
-        }
+        let label_add =  if let Some(label) = page.label {
+            format!("\\phantomsection\\hypertarget{{{}}}\n", label).to_string()
+        } else {
+            "".to_string()
+        };
         match page.content {
             Page_Content::Dialogue {
-                character_name: character_key,
+                character_name,
                 text,
             } => {
                 output += format!(
                     "\\frametitle{{{}}}\n\
+                    {}\
                     {}\n",
-                    character_key, text
+                    character_name, label_add, escape_for_latex(text)
                 )
                 .as_str();
             }
             Page_Content::Menu { character_name, text, choices } => {
                 output += format!("\\frametitle{{{}}}\n", character_name).as_str();
-                output += format!("{}\n", text).as_str();
+                output += &label_add;
+                output += format!("{}\n", escape_for_latex(text)).as_str();
                 output += "\\begin{itemize}\n";
                 for choice in choices {
-                    output += format!("\\item \\hyperlink{{{}}}{{{}}}\n", choice.jump_key, choice.text).as_str();
+                    output += format!("\\item \\hyperlink{{{}}}{{{}}}\n", choice.jump_key, escape_for_latex(choice.text)).as_str();
                 }
                 output += "\\end{itemize}\n";
             }
@@ -395,6 +431,13 @@ fn latex_output(pages: Vec<Page>) -> String {
     output
 }
 
+fn escape_for_latex(text: String) -> String {
+    if text.len() == 0 {
+        return "~".to_string();
+    }
+    text.replace("$", "\\$").replace("%", "\\%").replace("#", "\\#").replace("_", "\\_")
+}
+
 fn clean_up_text(text: String) -> String {
-    text.replace("\\\"", "\"")
+    text.replace("\\\"", "\"").replace("\\n", "\n")
 }
