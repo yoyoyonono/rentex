@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fs};
 
 #[derive(Debug, Clone)]
 struct ParseLogicalLine {
@@ -15,6 +15,19 @@ enum ParseStatement {
     Choice { text: String },
     Jump { key: String },
     End {},
+    Show { key: String, location: Location },
+    StageDirection { location: Location },
+    Scene {},
+}
+
+#[derive(Debug, Clone)]
+enum Location {
+    Left,
+    CenterLeft,
+    Center,
+    CenterRight,
+    Right,
+    Off,
 }
 
 #[derive(Debug, Clone)]
@@ -26,13 +39,15 @@ struct Character {
 #[derive(Debug, Clone)]
 struct Page {
     index: usize,
-    label: Option::<String>,
-    content: Page_Content,
-    unconditional_jump: Option::<String>,
+    label: Option<String>,
+    text: PageText,
+    images: [Option<String>; 5],
+    unconditional_jump: Option<String>,
+    end: bool,
 }
 
 #[derive(Debug, Clone)]
-enum Page_Content {
+enum PageText {
     Dialogue {
         character_name: String,
         text: String,
@@ -52,7 +67,7 @@ struct MenuChoice {
 
 fn main() {
     let script = std::fs::read_to_string("input/script.rpy").unwrap();
-    let mut logical_lines = Vec::<ParseLogicalLine>::new();
+    let mut logical_lines: Vec<ParseLogicalLine> = Vec::<ParseLogicalLine>::new();
     let mut look_for_keys = Vec::<String>::new();
 
     logical_lines.push(ParseLogicalLine {
@@ -70,6 +85,27 @@ fn main() {
         match parse_line(line.to_string(), &mut look_for_keys) {
             Ok(logical_line) => logical_lines.push(logical_line),
             Err(_) => (println!("Invalid line: {}", line)),
+        }
+        if logical_lines.len() > 2 {
+            let last_line = logical_lines.last().unwrap();
+            let two_index = logical_lines.len() - 2;
+            match &last_line.statement {
+                ParseStatement::StageDirection { location } => {
+                    let statement = logical_lines.get(two_index).unwrap().statement.clone();
+                    match statement {
+                        ParseStatement::Show { key, location: _ } => {
+                            logical_lines.get_mut(two_index).unwrap().statement =
+                                ParseStatement::Show {
+                                    key: key,
+                                    location: location.clone(),
+                                };
+                        }
+                        _ => (),
+                    }
+                    logical_lines.pop();
+                }
+                _ => (),
+            }
         }
     }
 
@@ -100,6 +136,15 @@ fn main() {
             }
             ParseStatement::End {} => {
                 println!("End");
+            }
+            ParseStatement::Show { key, location } => {
+                println!("Show: {} at {:?}", key, location);
+            }
+            ParseStatement::StageDirection { location } => {
+                println!("Stage Direction: {:?}", location);
+            }
+            ParseStatement::Scene {} => {
+                println!("Scene");
             }
         }
     }
@@ -161,7 +206,9 @@ fn parse_line(
         if line.ends_with(":") {
             return Ok(ParseLogicalLine {
                 indent: line.find("\"").unwrap(),
-                statement: ParseStatement::Choice { text: clean_up_text(text) },
+                statement: ParseStatement::Choice {
+                    text: clean_up_text(text),
+                },
             });
         }
         return Ok(ParseLogicalLine {
@@ -189,9 +236,9 @@ fn parse_line(
             statement: ParseStatement::End {},
         });
     } else if line_trim.starts_with("$ speak") {
-        // Example line 
+        // Example line
         // $ speak(NICOLE, "Long story...")
-        let line_new = line_trim.replace("$ speak(", "").trim().to_string();        
+        let line_new = line_trim.replace("$ speak(", "").trim().to_string();
         let line_split: Vec<String> = line_new.splitn(2, ",").map(|x| x.to_string()).collect();
         let key = line_split[0].trim().to_string();
         let first_quote = line_split[1].find("\"").unwrap();
@@ -203,6 +250,82 @@ fn parse_line(
                 character_key: key,
                 text: clean_up_text(text),
             },
+        });
+    } else if line_trim.starts_with("show") {
+        let line_new = line_trim.replace("show", "").trim().to_string();
+        let line_split = line_new.split(" at ").collect::<Vec<&str>>();
+        let key = line_split[0]
+            .replace(":", "")
+            .replace("flipped", "")
+            .trim()
+            .to_string();
+        let location = if (line_split.len() > 1) {
+            match line_split[1].trim() {
+                "left" => Location::Left,
+                "right" => Location::Right,
+                _ => Location::Center,
+            }
+        } else {
+            Location::Center
+        };
+        return Ok(ParseLogicalLine {
+            indent: line.find("show").unwrap(),
+            statement: ParseStatement::Show {
+                key: key,
+                location: location,
+            },
+        });
+    } else if line_trim.starts_with("scene") {
+        return Ok(ParseLogicalLine {
+            indent: line.find("scene").unwrap(),
+            statement: ParseStatement::Scene {},
+        });
+    } else if [
+        "leftstage",
+        "leftcenterstage",
+        "centerstage",
+        "rightcenterstage",
+        "rightstage",
+        "off_right",
+        "off_left",
+        "off_farright",
+        "off_farleft",
+        "percsuperleft",
+        "percrightcenter",
+        "xalign",
+    ]
+    .iter()
+    .any(|x| line.contains(x))
+    {
+        let location = if line_trim.contains("off") {
+            Location::Off
+        } else if line_trim.contains("leftcenterstage") {
+            Location::CenterLeft
+        } else if line_trim.contains("rightcenterstage") {
+            Location::CenterRight
+        } else if line_trim.contains("leftstage") {
+            Location::Left
+        } else if line_trim.contains("rightstage") {
+            Location::Right
+        } else if line_trim.contains("xalign") {
+            let xalign_index = line_trim.find("xalign").unwrap();
+            let next_word = line_trim[xalign_index + 6..]
+                .split(" ")
+                .nth(1).unwrap();
+            let xalign = next_word.parse::<f32>().unwrap();
+            if xalign < 0.33 {
+                Location::Left
+            } else if xalign < 0.66 {
+                Location::Center
+            } else {
+                Location::Right
+            }
+        } else {
+            Location::Center
+        };
+        return Ok(ParseLogicalLine {
+            indent: 8,
+            statement: ParseStatement::StageDirection { location: location },
         });
     } else {
         for key in look_for_keys.iter() {
@@ -229,18 +352,6 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
     let mut pages = Vec::<Page>::new();
     let mut characters = HashMap::<String, Character>::new();
 
-    // push title page
-
-    pages.push(Page {
-        index: 0,
-        label: None,
-        content: Page_Content::Dialogue {
-            character_name: "".to_string(),
-            text: "Title Page".to_string(),
-        },
-        unconditional_jump: None,
-    });
-
     // define characters
     for line in logical_lines.clone() {
         let statement = &line.statement;
@@ -259,9 +370,13 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
     let mut current_index = label_start_index + 1;
     let mut next_has_label = false;
     let mut next_label = "".to_string();
+    let mut on_screen_characters = [None, None, None, None, None];
+
     loop {
         let line = &logical_lines[current_index];
         let statement = &line.statement;
+        println!("Currently using: {:?}", statement);
+        println!("Currently showing: {:?}", on_screen_characters);
         match statement {
             ParseStatement::Dialogue {
                 character_key,
@@ -275,11 +390,13 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
                 pages.push(Page {
                     index: current_index,
                     label: label,
-                    content: Page_Content::Dialogue {
+                    text: PageText::Dialogue {
                         character_name: characters.get(character_key).unwrap().name.clone(),
                         text: text.clone(),
                     },
+                    images: on_screen_characters.clone(),
                     unconditional_jump: None,
+                    end: false,
                 });
                 current_index += 1;
             }
@@ -310,7 +427,10 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
                             choices.last_mut().unwrap().jump_key = key.clone();
                             current_index += 1;
                         }
-                        ParseStatement::Dialogue { character_key, text }  => {
+                        ParseStatement::Dialogue {
+                            character_key,
+                            text,
+                        } => {
                             character_name = characters.get(character_key).unwrap().name.clone();
                             character_text = text.clone();
 
@@ -325,8 +445,14 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
                 pages.push(Page {
                     index: current_index,
                     label: None,
-                    content: Page_Content::Menu { character_name: character_name, text: character_text, choices: choices },
+                    text: PageText::Menu {
+                        character_name: character_name,
+                        text: character_text,
+                        choices: choices,
+                    },
+                    images: [None, None, None, None, None],
                     unconditional_jump: None,
+                    end: false,
                 });
             }
             ParseStatement::Label { key } => {
@@ -336,19 +462,55 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
                 current_index += 1;
             }
             ParseStatement::Jump { key } => {
-                pages.last_mut().unwrap().unconditional_jump = Some(key.clone());
+                if pages.len() > 0 {
+                    pages.last_mut().unwrap().unconditional_jump = Some(key.clone());
+                }
                 current_index += 1;
             }
             ParseStatement::End {} => {
                 pages.push(Page {
                     index: current_index,
                     label: None,
-                    content: Page_Content::Dialogue {
+                    text: PageText::Dialogue {
                         character_name: "".to_string(),
                         text: "End".to_string(),
                     },
+                    images: on_screen_characters.clone(),
                     unconditional_jump: None,
+                    end: true,
                 });
+                current_index += 1;
+            }
+            ParseStatement::Show { key, location } => {
+                for i in 0..on_screen_characters.len() {
+                    if let Some(character) = &on_screen_characters[i] {
+                        if character == key {
+                            on_screen_characters[i] = None;
+                        }
+                    }
+                }
+                match location {
+                    Location::Left => {
+                        on_screen_characters[0] = Some(key.clone());
+                    }
+                    Location::CenterLeft => {
+                        on_screen_characters[1] = Some(key.clone());
+                    }
+                    Location::Center => {
+                        on_screen_characters[2] = Some(key.clone());
+                    }
+                    Location::CenterRight => {
+                        on_screen_characters[3] = Some(key.clone());
+                    }
+                    Location::Right => {
+                        on_screen_characters[4] = Some(key.clone());
+                    }
+                    Location::Off => {}
+                }
+                current_index += 1;
+            }
+            ParseStatement::Scene {} => {
+                on_screen_characters = [None, None, None, None, None];
                 current_index += 1;
             }
             _ => {
@@ -389,40 +551,85 @@ fn latex_output(pages: Vec<Page>) -> String {
     \\frame{\\titlepage}\n\
     ";
 
-    for page in pages {
+    for (index, page_iter) in pages.iter().enumerate() {
+        let page = page_iter.clone();
         output += "\\begin{frame}\n";
-        let label_add =  if let Some(label) = page.label {
+        let label_add = if let Some(label) = page.label {
             format!("\\phantomsection\\hypertarget{{{}}}\n", label).to_string()
         } else {
             "".to_string()
         };
-        match page.content {
-            Page_Content::Dialogue {
+        let page_index_label = format!("\\phantomsection\\hypertarget{{pagenumber{}}}\n", index);
+        if page.images != [None, None, None, None, None] {
+            output += "\\begin{columns}\n";
+            for image in page.images {
+                if let Some(filename) = image {
+                    if fs::exists(format!("output/images/{}.png", filename).as_str()).unwrap() {
+                        output += "\\begin{column}{0.2\\textwidth}\n";
+                        output += format!(
+                            "\\includegraphics[width=\\textwidth]{{images/{}.png}}\n",
+                            filename
+                        )
+                        .as_str();
+                        output += "\\end{column}\n";
+                    }
+                } else {
+                    output += "\\begin{column}{0.2\\textwidth}\n";
+                    output += "\\end{column}\n";
+                }
+            }
+            output += "\\end{columns}\n";
+        }
+        match page.text.clone() {
+            PageText::Dialogue {
                 character_name,
                 text,
             } => {
                 output += format!(
                     "\\frametitle{{{}}}\n\
                     {}\
+                    {}\
                     {}\n",
-                    character_name, label_add, escape_for_latex(text)
+                    character_name,
+                    label_add,
+                    page_index_label,
+                    escape_for_latex(text)
                 )
                 .as_str();
             }
-            Page_Content::Menu { character_name, text, choices } => {
+            PageText::Menu {
+                character_name,
+                text,
+                choices,
+            } => {
                 output += format!("\\frametitle{{{}}}\n", character_name).as_str();
                 output += &label_add;
+                output += &page_index_label;
                 output += format!("{}\n", escape_for_latex(text)).as_str();
                 output += "\\begin{itemize}\n";
                 for choice in choices {
-                    output += format!("\\item \\hyperlink{{{}}}{{{}}}\n", choice.jump_key, escape_for_latex(choice.text)).as_str();
+                    output += format!(
+                        "\\item \\hyperlink{{{}}}{{{}}}\n",
+                        choice.jump_key,
+                        escape_for_latex(choice.text)
+                    )
+                    .as_str();
                 }
                 output += "\\end{itemize}\n";
             }
         }
+        output += "\\vfill{}\n";
+        output += "\\begin{flushright}\n";
         if let Some(jump) = page.unconditional_jump {
             output += format!("\\hyperlink{{{}}}{{\\beamergotobutton{{Next}}}}\n", jump).as_str();
+        } else if !(matches!(page.text, PageText::Menu { .. }) || page.end) {
+            output += format!(
+                "\\hyperlink{{pagenumber{}}}{{\\beamergotobutton{{Next}}}}\n",
+                index + 1
+            )
+            .as_str();
         }
+        output += "\\end{flushright}\n";
         output += "\\end{frame}\n";
     }
 
@@ -435,7 +642,10 @@ fn escape_for_latex(text: String) -> String {
     if text.len() == 0 {
         return "~".to_string();
     }
-    text.replace("$", "\\$").replace("%", "\\%").replace("#", "\\#").replace("_", "\\_")
+    text.replace("$", "\\$")
+        .replace("%", "\\%")
+        .replace("#", "\\#")
+        .replace("_", "\\_")
 }
 
 fn clean_up_text(text: String) -> String {
