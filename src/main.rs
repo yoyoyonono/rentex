@@ -51,7 +51,7 @@ struct MenuChoice {
 }
 
 fn main() {
-    let script = std::fs::read_to_string("script.rpy").unwrap();
+    let script = std::fs::read_to_string("input/script.rpy").unwrap();
     let mut logical_lines = Vec::<ParseLogicalLine>::new();
     let mut look_for_keys = Vec::<String>::new();
 
@@ -110,7 +110,7 @@ fn main() {
 
     let latex = latex_output(pages);
 
-    std::fs::write("out.tex", latex).unwrap();
+    std::fs::write("output/out.tex", latex).unwrap();
 }
 
 fn parse_line(
