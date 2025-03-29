@@ -309,9 +309,7 @@ fn parse_line(
             Location::Right
         } else if line_trim.contains("xalign") {
             let xalign_index = line_trim.find("xalign").unwrap();
-            let next_word = line_trim[xalign_index + 6..]
-                .split(" ")
-                .nth(1).unwrap();
+            let next_word = line_trim[xalign_index + 6..].split(" ").nth(1).unwrap();
             let xalign = next_word.parse::<f32>().unwrap();
             if xalign < 0.33 {
                 Location::Left
@@ -484,7 +482,7 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
             ParseStatement::Show { key, location } => {
                 for i in 0..on_screen_characters.len() {
                     if let Some(character) = &on_screen_characters[i] {
-                        if character == key {
+                        if character.split(' ').nth(0).unwrap() == key.split(' ').nth(0).unwrap() {
                             on_screen_characters[i] = None;
                         }
                     }
@@ -542,8 +540,9 @@ fn find_label_index(logical_lines: Vec<ParseLogicalLine>, key: String) -> usize 
 fn latex_output(pages: Vec<Page>) -> String {
     let mut output = String::new();
 
-    output += "\\documentclass{beamer}\n\
+    output += "\\documentclass[aspectratio=169]{beamer}\n\
     \\usepackage{hyperref}\n\
+    \\beamertemplatenavigationsymbolsempty\n\
     \\title{Game Title}\n\
     \\author{Game Author}\n\
     \\date{\\today}\n\
@@ -585,17 +584,10 @@ fn latex_output(pages: Vec<Page>) -> String {
                 character_name,
                 text,
             } => {
-                output += format!(
-                    "\\frametitle{{{}}}\n\
-                    {}\
-                    {}\
-                    {}\n",
-                    character_name,
-                    label_add,
-                    page_index_label,
-                    escape_for_latex(text)
-                )
-                .as_str();
+                output += format!("\\frametitle{{{}}}\n", character_name).as_str();
+                output += &label_add;
+                output += &page_index_label;
+                output += format!("{}\n", escape_for_latex(text)).as_str();
             }
             PageText::Menu {
                 character_name,
