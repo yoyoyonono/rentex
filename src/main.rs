@@ -17,7 +17,7 @@ enum ParseStatement {
     End {},
     Show { key: String, location: Location },
     StageDirection { location: Location },
-    Scene {},
+    Scene { key: String},
 }
 
 #[derive(Debug, Clone)]
@@ -41,7 +41,8 @@ struct Page {
     index: usize,
     label: Option<String>,
     text: PageText,
-    images: [Option<String>; 5],
+    character_images: [Option<String>; 5],
+    background: Option<String>,
     unconditional_jump: Option<String>,
     end: bool,
 }
@@ -66,7 +67,7 @@ struct MenuChoice {
 }
 
 fn main() {
-    let script = std::fs::read_to_string("input/script.rpy").unwrap();
+    let script = std::fs::read_to_string("input/script09_cut.rpy").unwrap();
     let mut logical_lines: Vec<ParseLogicalLine> = Vec::<ParseLogicalLine>::new();
     let mut look_for_keys = Vec::<String>::new();
 
@@ -143,8 +144,8 @@ fn main() {
             ParseStatement::StageDirection { location } => {
                 println!("Stage Direction: {:?}", location);
             }
-            ParseStatement::Scene {} => {
-                println!("Scene");
+            ParseStatement::Scene { key } => {
+                println!("Scene: {}", key);
             }
         }
     }
@@ -169,17 +170,21 @@ fn parse_line(
 
         let key = line_split[0].trim().to_string();
 
+        println!("{}", line);
+
         let name_first_quote = line_split[1].find("\"").unwrap();
         let name_last_quote = line_split[1].rfind("\"").unwrap();
         let name = line_split[1][name_first_quote + 1..name_last_quote].to_string();
 
-        let color = if line_trim.contains("color") {
+        /*let color = if line_trim.contains("color") {
             let color_first_quote = line_split[2].find("\"").unwrap();
             let color_last_quote = line_split[2].rfind("\"").unwrap();
             line_split[2][color_first_quote + 1..color_last_quote].to_string()
         } else {
             "".to_string()
-        };
+        };*/
+        
+        let color = "".to_string();
 
         let character = Character {
             name: name,
@@ -276,9 +281,13 @@ fn parse_line(
             },
         });
     } else if line_trim.starts_with("scene") {
+        let line_new = line_trim.replace("scene", "").trim().to_string();
+        let key = line_new.replace(":", "");
         return Ok(ParseLogicalLine {
             indent: line.find("scene").unwrap(),
-            statement: ParseStatement::Scene {},
+            statement: ParseStatement::Scene {
+                key: key,
+            },
         });
     } else if [
         "leftstage",
@@ -369,6 +378,7 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
     let mut next_has_label = false;
     let mut next_label = "".to_string();
     let mut on_screen_characters = [None, None, None, None, None];
+    let mut current_background = None;
 
     loop {
         let line = &logical_lines[current_index];
@@ -392,7 +402,8 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
                         character_name: characters.get(character_key).unwrap().name.clone(),
                         text: text.clone(),
                     },
-                    images: on_screen_characters.clone(),
+                    character_images: on_screen_characters.clone(),
+                    background: current_background.clone(),
                     unconditional_jump: None,
                     end: false,
                 });
@@ -448,7 +459,8 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
                         text: character_text,
                         choices: choices,
                     },
-                    images: [None, None, None, None, None],
+                    character_images: [None, None, None, None, None],
+                    background: None,
                     unconditional_jump: None,
                     end: false,
                 });
@@ -473,7 +485,8 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
                         character_name: "".to_string(),
                         text: "End".to_string(),
                     },
-                    images: on_screen_characters.clone(),
+                    character_images: on_screen_characters.clone(),
+                    background: None,
                     unconditional_jump: None,
                     end: true,
                 });
@@ -507,7 +520,8 @@ fn traverse_game(logical_lines: Vec<ParseLogicalLine>) -> Vec<Page> {
                 }
                 current_index += 1;
             }
-            ParseStatement::Scene {} => {
+            ParseStatement::Scene { key} => {
+                current_background = Some(key.to_string());
                 on_screen_characters = [None, None, None, None, None];
                 current_index += 1;
             }
@@ -552,6 +566,12 @@ fn latex_output(pages: Vec<Page>) -> String {
 
     for (index, page_iter) in pages.iter().enumerate() {
         let page = page_iter.clone();
+        output += "{\n";
+        if let Some(filename) = page.background {
+            if fs::exists(format!("output/images/{}.png", filename).as_str()).unwrap() {
+                output += format!("\\setbeamertemplate{{background}}{{\\includegraphics[width=\\paperwidth, height=\\paperheight]{{images/{}.png}}}}", filename).as_str();
+            }
+        }
         output += "\\begin{frame}\n";
         let label_add = if let Some(label) = page.label {
             format!("\\phantomsection\\hypertarget{{{}}}\n", label).to_string()
@@ -559,9 +579,9 @@ fn latex_output(pages: Vec<Page>) -> String {
             "".to_string()
         };
         let page_index_label = format!("\\phantomsection\\hypertarget{{pagenumber{}}}\n", index);
-        if page.images != [None, None, None, None, None] {
+        if page.character_images != [None, None, None, None, None] {
             output += "\\begin{columns}\n";
-            for image in page.images {
+            for image in page.character_images {
                 if let Some(filename) = image {
                     if fs::exists(format!("output/images/{}.png", filename).as_str()).unwrap() {
                         output += "\\begin{column}{0.2\\textwidth}\n";
@@ -623,6 +643,7 @@ fn latex_output(pages: Vec<Page>) -> String {
         }
         output += "\\end{flushright}\n";
         output += "\\end{frame}\n";
+        output += "}\n";
     }
 
     output += "\\end{document}\n";
